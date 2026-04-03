@@ -1,218 +1,103 @@
-# crystal-adk
+# Crystal.Adk V0.2.0
 
-[English](./README.en.md) | [简体中文](./README.zh-CN.md)
+`Crystal.Adk` 是一个面向 C# 的轻量类库项目，用来承载最小可用的对话运行时抽象。
 
-Lightweight Agent Development Kit for C# / .NET.
+当前这版库聚焦三件事：
 
-`crystal-adk` keeps the runtime layer small: session messages, tool loop, provider protocol mapping, and text streaming. Business logic stays outside the ADK.
+- 统一消息模型，屏蔽不同厂商聊天接口的消息格式差异
+- 提供可替换的 Provider 抽象，分别负责非流式与流式发送/接收
+- 提供基于 Session 的会话操作入口，以及独立的消息历史操作入口
 
-## What It Does
+这不是脚手架项目，也不负责替开发者读取配置文件、环境变量或自动补系统提示词。初始化参数、起始消息、上下文裁剪策略都由接入方自己决定。
 
-- manages conversation message state
-- runs the `assistant -> tool -> assistant` loop
-- exposes one provider factory for different vendors
-- supports non-streaming runs
-- supports text streaming
-- supports run events as an async sequence
+## 当前库内包含的部分
 
-## What It Does Not Try To Be
+- `Abstractions/`
+  统一消息结构与流式文本结构
+- `Providers/`
+  Provider 抽象、Provider 工厂、厂商实现与发送解析逻辑
+- `Session/`
+  会话操作入口与消息历史操作入口
+- `DOCS/`
+  架构说明、版本设计稿、厂商协议资料
 
-- a workflow engine
-- a planner framework
-- a plugin platform
-- a web host abstraction
+## 当前能力边界
 
-## Install / Reference
+当前已提供：
 
-This repo currently uses project reference style.
+- 非流式对话调用
+- 文本流式对话调用
+- 会话历史追加、编辑、导出
+- ARK Provider
+- Ollama Provider
 
-Add a reference from your app:
+当前暂未提供：
+
+- 自动工具循环
+- 统一事件流运行时
+- 内置配置加载器
+- 内置系统提示词策略
+
+## 目前支持的模型厂商
+
+- `ARK / 火山引擎`
+  - Vendor 值：`ark`
+  - Provider 实现：`Providers/Models/Ark/ArkChatProvider.cs`
+  - 当前支持：非流式对话、文本流式对话
+
+- `Ollama`
+  - Vendor 值：`ollama`
+  - Provider 实现：`Providers/Models/Ollama/OllamaChatProvider.cs`
+  - 当前支持：非流式对话、文本流式对话
+
+
+## 项目配套
+
+库项目：
+
+- 当前目录：`crystal-adk/`
+
+测试/实验项目：
+
+- `adk-lab/`
+- 测试项目链接：`https://github.com/bobonotsmile/adk-test.git`
+
+## 引用方式
+
+项目内引用时，同目录根同级下可直接引用：
 
 ```xml
-<ItemGroup>
-  <ProjectReference Include="..\\crystal-adk\\Crystal.Adk.csproj" />
-</ItemGroup>
+<ProjectReference Include="..\\crystal-adk\\Crystal.Adk.csproj" />
 ```
 
-Target framework is currently `net6.0`.
-
-## Quick Start
-
-### 1. Create a provider
+最小使用示例如下：
 
 ```csharp
-using Crystal.Adk.Core;
+using Crystal.Adk.Abstractions;
 using Crystal.Adk.Providers;
+using Crystal.Adk.Session;
+
+var options = new ChatProviderOptions
+{
+    Vendor = "ark",
+    ApiKey = "...",
+    Model = "...",
+    BaseUrl = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
+};
 
 using var httpClient = new HttpClient();
+var provider = ChatProviderFactory.Create(httpClient, options);
 
-var provider = ChatProvider.Create(httpClient, new ChatProviderSettings
+var history = new SessionMessageManager(new[]
 {
-    Vendor = "ollama",
-    BaseUrl = "http://127.0.0.1:11434/api/chat",
-    Model = "gpt-oss:20b",
-    Temperature = 0.2,
-    TopP = 0.9,
-    MaxOutputTokens = 512,
-    EnableThinking = false
-});
-```
-
-Supported vendor values in the current codebase:
-
-- `ollama`
-- `ark`
-
-### 2. Create a host and session
-
-```csharp
-var host = new AgentHost(provider, new AgentHostOptions
-{
-    SystemPrompt = "You are a concise assistant.",
-    MaxRounds = 4
+    new RuntimeMessage { Role = "system", Content = "你是一个简洁的助手。" }
 });
 
-var session = host.CreateSession();
+var session = new AgentSession(provider, history);
+var assistant = await session.RunAsync("你好");
 ```
 
-### 3. Run in non-streaming mode
+## 文档
 
-```csharp
-var result = await session.RunAsync("Query device EQ-001");
-
-Console.WriteLine(result.FinalMessage);
-```
-
-### 4. Stream text
-
-```csharp
-await foreach (var chunk in session.StreamTextAsync("Explain device history analysis"))
-{
-    Console.Write(chunk.Text);
-}
-```
-
-### 5. Consume run events
-
-```csharp
-await foreach (var evt in session.StreamEventsAsync("Query device EQ-001 and summarize status"))
-{
-    Console.WriteLine(evt.Kind);
-}
-```
-
-Current event kinds:
-
-- `run_started`
-- `tool_call_started`
-- `tool_call_completed`
-- `final_answer`
-- `run_completed`
-- `run_failed`
-
-Note: in `v0.1.0`, `StreamEventsAsync(...)` is not provider realtime chunk streaming. It is a normalized async event sequence produced during a run.
-
-## Tool Example
-
-```csharp
-using Crystal.Adk.Core;
-
-public sealed class QueryDeviceInfoTool : IAgentTool
-{
-    public AgentToolDescriptor Descriptor { get; } = new()
-    {
-        Name = "query_device_info",
-        Description = "Query basic device info and status.",
-        ParametersSchema = new
-        {
-            type = "object",
-            properties = new
-            {
-                deviceCode = new { type = "string", description = "Device code, e.g. EQ-001" }
-            },
-            required = new[] { "deviceCode" }
-        }
-    };
-
-    public Task<object?> InvokeAsync(Dictionary<string, object?> arguments, CancellationToken cancellationToken)
-    {
-        var deviceCode = arguments["deviceCode"]?.ToString();
-        return Task.FromResult<object?>(new
-        {
-            deviceCode,
-            status = "running"
-        });
-    }
-}
-```
-
-Register it when creating the host:
-
-```csharp
-var toolHub = new ToolHub();
-toolHub.Register(new QueryDeviceInfoTool());
-
-var host = new AgentHost(toolHub, provider, new AgentHostOptions
-{
-    SystemPrompt = "Use tools when structured data is needed.",
-    MaxRounds = 6
-});
-```
-
-## How To Run The Lab Project
-
-The workspace includes `adk-lab/` as a playground for examples.
-
-Run examples:
-
-```powershell
-dotnet run --project .\adk-lab\adk-lab.csproj -- 01
-dotnet run --project .\adk-lab\adk-lab.csproj -- 02
-dotnet run --project .\adk-lab\adk-lab.csproj -- 03
-dotnet run --project .\adk-lab\adk-lab.csproj -- 04
-dotnet run --project .\adk-lab\adk-lab.csproj -- 05
-dotnet run --project .\adk-lab\adk-lab.csproj -- 06
-```
-
-Examples currently cover:
-
-- `01`: Ollama non-streaming
-- `02`: Ollama text streaming
-- `03`: Ollama tool run events
-- `04`: ARK non-streaming
-- `05`: ARK text streaming
-- `06`: ARK tool run events
-
-## Repository Layout
-
-```text
-crystal-adk/
-├─ Core/
-├─ Providers/
-├─ Session/
-├─ DOCS/
-└─ Crystal.Adk.csproj
-```
-
-## Docs
-
-- [DOCS/版本设计/v0.1.0/代码设计.md](./DOCS/%E7%89%88%E6%9C%AC%E8%AE%BE%E8%AE%A1/v0.1.0/%E4%BB%A3%E7%A0%81%E8%AE%BE%E8%AE%A1.md)
-- [DOCS/版本设计/v0.1.0/特性清单.md](./DOCS/%E7%89%88%E6%9C%AC%E8%AE%BE%E8%AE%A1/v0.1.0/%E7%89%B9%E6%80%A7%E6%B8%85%E5%8D%95.md)
-
-## Current Scope
-
-Current `v0.1.0` direction:
-
-- `RunAsync(...)`
-- `StreamTextAsync(...)`
-- `StreamEventsAsync(...)`
-- in-memory session state
-- function calling
-- provider compatibility focused on ARK and Ollama
-
-Not planned for `v0.1.0`:
-
-- workflow / planner abstractions
-- plugin system
-- persistent session store
-- context compression / auto-summary
+- 架构说明（包含架构设计、函数职责、数据结构、代码使用体验）：`DOCS/crystal-adk 架构说明/`
+- 厂商协议资料：`DOCS/厂商ChatAPI协议/`
