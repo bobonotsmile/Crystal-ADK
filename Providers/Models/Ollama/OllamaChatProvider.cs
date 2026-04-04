@@ -61,7 +61,7 @@ internal sealed class OllamaChatProvider : IChatProvider
         await using var stream = await response.Content.ReadAsStreamAsync(cts.Token);
         using var reader = new StreamReader(stream);
 
-        await foreach (var chunk in ReadStreamAsync(reader, cancellationToken))
+        await foreach (var chunk in ReadStreamAsync(reader, cts.Token))
         {
             yield return chunk;
         }
@@ -152,7 +152,7 @@ internal sealed class OllamaChatProvider : IChatProvider
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var line = await reader.ReadLineAsync();
+            var line = await reader.ReadLineAsync().WaitAsync(cancellationToken);
             if (line is null)
             {
                 yield break;

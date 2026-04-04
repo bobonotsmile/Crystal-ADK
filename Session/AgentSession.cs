@@ -25,10 +25,10 @@ public sealed class AgentSession
         string userInput,
         CancellationToken cancellationToken = default)
     {
-        _messageManager.AddUser(userInput);
-
-        var requestMessages = BuildRequestMessages();
+        var requestMessages = BuildRequestMessages(userInput);
         var assistant = await _provider.CompleteAsync(requestMessages, cancellationToken);
+
+        _messageManager.AddUser(userInput);
         _messageManager.Add(assistant);
         return assistant;
     }
@@ -37,9 +37,7 @@ public sealed class AgentSession
         string userInput,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        _messageManager.AddUser(userInput);
-
-        var requestMessages = BuildRequestMessages();
+        var requestMessages = BuildRequestMessages(userInput);
         var fullText = new StringBuilder();
         var fullThinking = new StringBuilder();
 
@@ -70,6 +68,7 @@ public sealed class AgentSession
             };
         }
 
+        _messageManager.AddUser(userInput);
         _messageManager.AddAssistant(
             fullText.ToString(),
             fullThinking.Length > 0 ? fullThinking.ToString() : null);
@@ -80,8 +79,15 @@ public sealed class AgentSession
         _messageManager.Clear();
     }
 
-    private List<RuntimeMessage> BuildRequestMessages()
+    private List<RuntimeMessage> BuildRequestMessages(string userInput)
     {
-        return _messageManager.Export();
+        var messages = _messageManager.Export();
+        messages.Add(new RuntimeMessage
+        {
+            Role = "user",
+            Content = userInput
+        });
+
+        return messages;
     }
 }

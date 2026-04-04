@@ -7,7 +7,14 @@ public static class ChatProviderFactory
 {
     public static IChatProvider Create(HttpClient httpClient, ChatProviderOptions options)
     {
-        return options.Vendor switch
+        if (string.IsNullOrWhiteSpace(options.Vendor))
+        {
+            throw new InvalidOperationException("Vendor is required.");
+        }
+
+        var vendor = options.Vendor.Trim().ToLowerInvariant();
+
+        return vendor switch
         {
             "ark" => new ArkChatProvider(httpClient, options),
             "ollama" => new OllamaChatProvider(httpClient, options),

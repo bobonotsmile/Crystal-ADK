@@ -61,7 +61,7 @@ internal sealed class ArkChatProvider : IChatProvider
         await using var stream = await response.Content.ReadAsStreamAsync(cts.Token);
         using var reader = new StreamReader(stream);
 
-        await foreach (var chunk in ReadStreamAsync(reader, cancellationToken))
+        await foreach (var chunk in ReadStreamAsync(reader, cts.Token))
         {
             yield return chunk;
         }
@@ -96,16 +96,19 @@ internal sealed class ArkChatProvider : IChatProvider
         {
             ["model"] = _options.Model,
             ["messages"] = MapMessages(messages),
-            ["stream"] = stream,
-            ["thinking"] = new Dictionary<string, object?>
-            {
-                ["type"] = _options.EnableThinking == true ? "enabled" : "disabled"
-            }
+            ["stream"] = stream
         };
 
         if (_options.Temperature.HasValue) body["temperature"] = _options.Temperature.Value;
         if (_options.TopP.HasValue) body["top_p"] = _options.TopP.Value;
         if (_options.MaxOutputTokens.HasValue) body["max_tokens"] = _options.MaxOutputTokens.Value;
+        if (_options.EnableThinking.HasValue)
+        {
+            body["thinking"] = new Dictionary<string, object?>
+            {
+                ["type"] = _options.EnableThinking.Value ? "enabled" : "disabled"
+            };
+        }
 
         return body;
     }
@@ -153,7 +156,7 @@ internal sealed class ArkChatProvider : IChatProvider
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var line = await reader.ReadLineAsync();
+            var line = await reader.ReadLineAsync().WaitAsync(cancellationToken);
             if (line is null)
             {
                 yield break;
